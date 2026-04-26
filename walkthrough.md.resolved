@@ -1,0 +1,149 @@
+# Face Recognition Project — Full Walkthrough
+
+## Overview
+
+An **OpenCV + Python** project for real-time face detection, recognition, and video effects. Built around the **Haar Cascade** classifier and **LBPH (Local Binary Pattern Histograms)** recognizer, with additional scripts for filters, AR overlays, recording, and timelapse.
+
+**Stack:** Python 3.6, OpenCV-Contrib 3.4, NumPy, Pillow, (optional) `face_recognition` library.
+
+---
+
+## Directory Structure
+
+```
+Face_recognisation/
+├── requirements.txt          # numpy + opencv-contrib-python
+├── runtime.txt               # python-3.6.4
+├── README.md                 # links to YouTube tutorial series
+└── src/
+    ├── faces.py              # ★ Main recognition app (live + image modes)
+    ├── faces-train.py        # ★ LBPH training pipeline
+    ├── Face_detect.py        # Alt approach using `face_recognition` lib
+    │
+    ├── filter.py             # Live camera filter effects
+    ├── glasses_and_stash.py  # AR: overlay glasses & mustache on faces
+    ├── watermark.py          # Overlay a logo watermark on video
+    ├── timelapse.py          # Capture timelapse images → video
+    ├── record.py             # Simple video recorder
+    │
+    ├── base.py               # Barebones camera capture loop
+    ├── camera-test.py        # Camera test (color + grayscale)
+    ├── res-change.py         # Resolution scaling demo
+    ├── utils.py              # CFEVideoConf class + image_resize()
+    │
+    ├── cascades/
+    │   ├── data/             # 17 Haar cascade XMLs (face, eye, smile, body, etc.)
+    │   └── third-party/      # frontalEyes35x16.xml, Nose18x15.xml
+    │
+    ├── images/               # Training images organized by person name
+    │   ├── Jk/               ← your face
+    │   ├── jk2/              ← another set
+    │   ├── emilia-clarke/
+    │   ├── kit-harington/
+    │   ├── nikolaj-coster-waldau/
+    │   ├── peter-dinklage/
+    │   ├── fun/              # glasses.png, mustache.png (AR assets)
+    │   └── logo/             # cfe-coffee.png (watermark)
+    │
+    ├── recognizers/
+    │   └── face-trainner.yml # Pre-trained LBPH model (~6.9 MB)
+    │
+    ├── pickles/
+    │   └── face-labels.pickle  # Label ↔ ID mapping
+    │
+    └── lessons/              # Tutorial lesson scripts
+        ├── filter_lesson.py
+        ├── record-video.py
+        ├── timelapse-how-to.py
+        └── watermark_lesson.py
+```
+
+---
+
+## Core Scripts
+
+### 1. Training — [faces-train.py](file:///e:/projects/Face_recognisation/src/faces-train.py)
+
+Builds the face recognition model:
+
+1. Walks [images/](file:///e:/projects/Face_recognisation/src/timelapse.py#41-53) directory — each sub-folder name becomes a **label**
+2. Converts images to grayscale, resizes to 550×550
+3. Runs Haar cascade detection to extract face ROIs
+4. Trains an **LBPH recognizer** with the detected faces
+5. Saves the model → [recognizers/face-trainner.yml](file:///e:/projects/Face_recognisation/src/recognizers/face-trainner.yml) and labels → [pickles/face-labels.pickle](file:///e:/projects/Face_recognisation/src/pickles/face-labels.pickle)
+
+### 2. Recognition — [faces.py](file:///e:/projects/Face_recognisation/src/faces.py)
+
+The main application with **5 different modes** (only one is active, rest are commented out):
+
+| Mode | Lines | Description |
+|------|-------|-------------|
+| Live webcam recognition | 1–73 | Detect + recognize faces on live video |
+| Static image recognition | 77–135 | Detect + recognize faces from an image file |
+| Long-distance live | 138–208 | Live mode with adjusted params for distant faces |
+| **Save-and-process (ACTIVE)** | **213–297** | Captures frame → saves → reloads → detects → recognizes |
+| Streamlined live | 311–379 | Simplified live capture + recognition loop |
+
+**Active mode** captures each webcam frame, saves it as [full_frame_live.png](file:///e:/projects/Face_recognisation/src/full_frame_live.png), reloads it, runs face detection (confidence range 4–85), labels recognized faces, draws blue rectangles, and saves cropped faces as [detected_face.png](file:///e:/projects/Face_recognisation/src/detected_face.png).
+
+### 3. Alt Detection — [Face_detect.py](file:///e:/projects/Face_recognisation/src/Face_detect.py)
+
+Uses the `face_recognition` library (dlib-based) for comparing face encodings between images followed by a live detection loop using `SimpleFacerec`.
+
+> [!WARNING]
+> This script has structural issues: `SimpleFacerec` is used before it's imported (line 16 vs 20), and images referenced (`Messi1.webp`, `images/Messi.webp`) aren't present in the repo.
+
+---
+
+## Video Effects & Utilities
+
+| Script | What it does |
+|--------|-------------|
+| [filter.py](file:///e:/projects/Face_recognisation/src/filter.py) | Applies 6 live camera filters: hue/saturation, sepia, color overlay, invert, circle blur, portrait mode |
+| [glasses_and_stash.py](file:///e:/projects/Face_recognisation/src/glasses_and_stash.py) | AR overlay — detects eyes & nose via cascades, overlays glasses.png and mustache.png |
+| [watermark.py](file:///e:/projects/Face_recognisation/src/watermark.py) | Adds a semi-transparent logo watermark to the bottom-right of live video |
+| [timelapse.py](file:///e:/projects/Face_recognisation/src/timelapse.py) | Captures frames every 0.25s for 20s, then stitches them into a video |
+| [record.py](file:///e:/projects/Face_recognisation/src/record.py) | Simple webcam video recorder (720p, AVI) |
+| [res-change.py](file:///e:/projects/Face_recognisation/src/res-change.py) | Demonstrates resolution scaling (30% and 500%) |
+| [base.py](file:///e:/projects/Face_recognisation/src/base.py) | Minimal camera capture loop |
+| [camera-test.py](file:///e:/projects/Face_recognisation/src/camera-test.py) | Shows color + grayscale feed side-by-side |
+
+---
+
+## Utility Module — [utils.py](file:///e:/projects/Face_recognisation/src/utils.py)
+
+- **[image_resize(image, width, height)](file:///e:/projects/Face_recognisation/src/utils.py#5-31)** — Aspect-ratio-preserving resize
+- **[CFEVideoConf](file:///e:/projects/Face_recognisation/src/utils.py#34-81)** class — Manages video capture resolution (360p–4K) and codec selection (XVID for AVI/MP4)
+
+---
+
+## How to Run
+
+```bash
+# 1. Install dependencies
+pip install numpy opencv-contrib-python Pillow
+
+# 2. Train the model (from src/ directory)
+cd src
+python faces-train.py
+
+# 3. Run face recognition
+python faces.py          # Press 'q' to quit
+
+# 4. Try other scripts
+python filter.py         # Live filters
+python glasses_and_stash.py  # AR glasses & mustache
+```
+
+> [!NOTE]
+> All scripts use `cv2.VideoCapture(0)` — your default webcam. If you have multiple cameras, change the index.
+
+---
+
+## Notable Observations
+
+1. **Outdated dependencies** — [requirements.txt](file:///e:/projects/Face_recognisation/requirements.txt) pins very old versions (numpy 1.14, opencv 3.4, Python 3.6). Modern Python 3.10+ and OpenCV 4.x are recommended.
+2. **[faces.py](file:///e:/projects/Face_recognisation/src/faces.py) is mostly commented out** — It contains 5 different approach iterations. Only the "save-and-process" loop (lines 213–297) is active.
+3. **[Face_detect.py](file:///e:/projects/Face_recognisation/src/Face_detect.py) has code order issues** — `SimpleFacerec()` is called before the import, and referenced images don't exist in the repo.
+4. **Training images included** — GoT actors (Emilia Clarke, Kit Harington, etc.) plus your own photos in `Jk/` and `jk2/`.
+5. **Pre-trained model exists** — [face-trainner.yml](file:///e:/projects/Face_recognisation/src/recognizers/face-trainner.yml) (6.9 MB) is ready to use without retraining.

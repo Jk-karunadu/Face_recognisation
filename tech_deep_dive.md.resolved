@@ -1,0 +1,321 @@
+# Libraries, Algorithms & Models — Deep Dive
+
+## Libraries & Packages
+
+### 1. OpenCV (`cv2`) — The Core Engine
+**What:** Open Source Computer Vision Library — the most widely used library for image/video processing.
+**Version used:** 3.4.0 (via `opencv-contrib-python`)
+
+**Why `opencv-contrib-python` and not just `opencv-python`?**
+- `opencv-python` = core modules only
+- `opencv-contrib-python` = core + **extra modules** including `cv2.face` which contains the LBPH face recognizer
+- Without `contrib`, `cv2.face.LBPHFaceRecognizer_create()` would throw an error
+
+**Key OpenCV functions used in this project:**
+
+| Function | Where Used | What It Does |
+|----------|-----------|-------------|
+| `cv2.VideoCapture(0)` | Almost all scripts | Opens webcam (0 = default camera) |
+| `cv2.imread()` | faces.py, glasses_and_stash.py | Reads an image file into a NumPy array |
+| `cv2.imwrite()` | faces.py, timelapse.py | Saves a NumPy array as an image file |
+| `cv2.imshow()` | All scripts | Displays an image in a GUI window |
+| `cv2.cvtColor()` | All scripts | Converts between color spaces (BGR→Gray, BGR→HSV, etc.) |
+| `cv2.resize()` | utils.py, res-change.py | Resizes images/frames |
+| `cv2.rectangle()` | faces.py | Draws a rectangle (bounding box around detected face) |
+| `cv2.putText()` | faces.py | Draws text on image (person's name) |
+| `cv2.CascadeClassifier()` | faces.py, faces-train.py | Loads a Haar Cascade XML for object detection |
+| `cv2.face.LBPHFaceRecognizer_create()` | faces.py, faces-train.py | Creates LBPH face recognizer instance |
+| `cv2.GaussianBlur()` | filter.py | Applies Gaussian blur (smoothing) |
+| `cv2.addWeighted()` | filter.py, watermark.py | Alpha-blends two images together |
+| `cv2.bitwise_not()` | filter.py | Inverts all pixel values (negative effect) |
+| `cv2.VideoWriter()` | record.py, timelapse.py, etc. | Writes frames to a video file |
+| `cv2.waitKey()` | All scripts | Waits for keyboard input (also keeps GUI alive) |
+
+---
+
+### 2. NumPy (`numpy`)
+**What:** Numerical Python — the fundamental library for array/matrix operations.
+**Version used:** 1.14.2
+
+**Why it's needed:**
+- OpenCV represents every image as a **NumPy array** (height × width × channels)
+- A 800×700 color image = NumPy array of shape [(700, 800, 3)](file:///e:/projects/Face_recognisation/src/utils.py#68-75) with dtype `uint8` (values 0–255)
+
+**Key NumPy usage:**
+
+```python
+# Creating a blank overlay (all zeros = black transparent image)
+overlay = np.zeros((frame_h, frame_w, 4), dtype='uint8')
+
+# Creating a solid color overlay
+overlay = np.full((frame_h, frame_w, 4), (20, 66, 112, 1), dtype='uint8')
+
+# Converting PIL image to NumPy array for OpenCV
+image_array = np.array(final_image, "uint8")
+
+# Converting labels list to NumPy array for training
+recognizer.train(x_train, np.array(y_labels))
+```
+
+---
+
+### 3. Pillow (`PIL` / `Image`)
+**What:** Python Imaging Library (modern fork) — for image file I/O and basic manipulation.
+
+**Why it's used instead of OpenCV for training:**
+```python
+pil_image = Image.open(path).convert("L")  # "L" = Luminance = Grayscale
+final_image = pil_image.resize((550, 550), Image.Resampling.LANCZOS)
+```
+- Pillow's `.convert("L")` is a clean one-liner for grayscale conversion
+- `LANCZOS` resampling produces higher quality resized images than OpenCV's default
+- The result is converted to a NumPy array before passing to OpenCV
+
+---
+
+### 4. [pickle](file:///e:/projects/Face_recognisation/src/pickles/face-labels.pickle) (Python Standard Library)
+**What:** Serializes Python objects to binary files and back.
+
+**Why it's used:**
+```python
+# Save the label dictionary to disk
+with open("pickles/face-labels.pickle", 'wb') as f:
+    pickle.dump(label_ids, f)   # {"jk": 0, "emilia-clarke": 1, ...}
+
+# Load it back
+with open("pickles/face-labels.pickle", 'rb') as f:
+    og_labels = pickle.load(f)
+    labels = {v: k for k, v in og_labels.items()}  # Flip: {0: "jk", 1: "emilia-clarke"}
+```
+The recognizer only works with numeric IDs. Pickle stores the name↔ID mapping so we can translate IDs back to names.
+
+---
+
+### 5. `face_recognition` Library (in Face_detect.py)
+**What:** A high-level Python library built on **dlib**'s deep learning face recognition model.
+
+**How it differs from OpenCV's approach:**
+
+| Aspect | OpenCV (LBPH) | face_recognition (dlib) |
+|--------|--------------|------------------------|
+| Algorithm | Hand-crafted texture features | Deep neural network |
+| Accuracy | Good for controlled conditions | Better across lighting/angles |
+| Speed | Faster | Slower (runs a CNN) |
+| Install difficulty | Easy (pip install) | Harder (needs dlib + CMake) |
+| Encoding | Histogram vectors | 128-dimensional face embeddings |
+
+```python
+# Encode a face into a 128-dim vector
+img_encoding = face_recognition.face_encodings(rgb_img)[0]
+
+# Compare two faces (returns [True] or [False])
+result = face_recognition.compare_faces([img_encoding], img_encoding2)
+```
+
+---
+
+### 6. Other Standard Library Modules
+
+| Module | Used In | Purpose |
+|--------|---------|---------|
+| `os` | faces-train.py, timelapse.py | File system operations (walk directories, path joining, delete files) |
+| `glob` | timelapse.py, filter.py | Find files matching a pattern (`*.jpg`) |
+| `time` | timelapse.py | `time.sleep()` — pause between timelapse captures |
+| `datetime` | timelapse.py | Calculate timelapse duration (start time + 20 seconds) |
+| `math` | filter.py | Imported but not actively used |
+| `random` | filter.py | Imported but not actively used |
+
+---
+
+## Algorithms
+
+### 1. Haar Cascade Classifier — Face Detection
+
+**What it does:** Finds *where* faces are in an image (outputs bounding box coordinates).
+
+**How it works (Viola-Jones Algorithm, 2001):**
+
+```mermaid
+flowchart TB
+    A["Input Image"] --> B["Convert to Grayscale"]
+    B --> C["Sliding Window\nScans across image at multiple scales"]
+    C --> D["Extract Haar Features\nEdge, line, and rectangle patterns"]
+    D --> E["Cascade of Classifiers\n~20 stages, each votes YES/NO"]
+    E -->|"All stages say YES"| F["✅ Face Detected!\nReturn (x, y, w, h)"]
+    E -->|"Any stage says NO"| G["❌ Not a face\nMove window"]
+```
+
+**Haar features** are simple patterns that detect edges and contrasts:
+```
+┌──────┬──────┐    ┌──────────────┐
+│ DARK │LIGHT │    │    LIGHT     │
+│      │      │    ├──────────────┤
+│      │      │    │    DARK      │
+└──────┴──────┘    └──────────────┘
+   Edge feature       Line feature
+```
+
+For example: the eye region is **darker** than the cheek below it → a horizontal edge feature detects this.
+
+**The "Cascade" part:**
+- 20+ classifiers arranged in stages
+- Stage 1 is very simple (rejects 50% of non-faces instantly)
+- Each stage gets more complex
+- A region must pass **ALL** stages to be declared a face
+- This makes it fast — most non-face regions are rejected in the first few stages
+
+**Key parameters:**
+```python
+faces = face_cascade.detectMultiScale(
+    gray,
+    scaleFactor=1.5,    # How much to shrink image at each scale (1.5 = 50% reduction)
+    minNeighbors=5,     # Minimum overlapping detections needed (higher = fewer false positives)
+    minSize=(50, 50)    # Smallest face size to detect (in pixels)
+)
+```
+
+| Parameter | Lower Value | Higher Value |
+|-----------|------------|-------------|
+| `scaleFactor` | More scales checked → slower but catches more faces | Fewer scales → faster but may miss faces |
+| `minNeighbors` | More detections but more false positives | Fewer but more reliable detections |
+
+---
+
+### 2. LBPH (Local Binary Pattern Histograms) — Face Recognition
+
+**What it does:** Identifies *who* a face belongs to (outputs a label ID + confidence score).
+
+**How it works:**
+
+```mermaid
+flowchart LR
+    A["Face ROI\n(Grayscale)"] --> B["Divide into\n8×8 Grid"]
+    B --> C["Calculate LBP\nfor each pixel"]
+    C --> D["Build Histogram\nper grid cell"]
+    D --> E["Concatenate\nHistograms"]
+    E --> F["Compare with\nTrained Histograms"]
+    F --> G["Closest Match\n= Predicted ID"]
+```
+
+**Step-by-step:**
+
+**Step 1 — LBP Calculation (for each pixel):**
+```
+Compare center pixel with its 8 neighbors:
+  
+  52  61  75        0  0  1
+  48 [60] 83   →    0 [X] 1   →  Binary: 00110110 → Decimal: 54
+  37  42  68        0  0  1
+  
+Rule: neighbor ≥ center? → 1, else → 0
+Read clockwise from top-left → binary number
+```
+
+**Step 2 — Histogram:** Count how often each LBP value (0–255) appears in each grid cell.
+
+**Step 3 — Recognition:** Compare the test face's histogram with every trained face's histogram using **Chi-Square distance**. The closest match = predicted identity.
+
+**Confidence score:**
+```python
+id_, conf = recognizer.predict(roi_gray)
+# conf = Chi-Square distance (lower = better match)
+# conf 0-40: very strong match
+# conf 40-80: good match  
+# conf 80+: poor match (might be wrong person)
+```
+
+---
+
+### 3. Deep Learning Face Embeddings (in Face_detect.py)
+
+**What:** A Convolutional Neural Network (CNN) trained on millions of faces produces a **128-dimensional vector** (embedding) for each face.
+
+```python
+# Each face becomes a list of 128 numbers
+encoding = face_recognition.face_encodings(image)[0]
+# → [0.0423, -0.1245, 0.0891, ..., 0.0134]  (128 values)
+```
+
+**Recognition:** Two faces are the "same person" if the **Euclidean distance** between their 128-dim vectors is below a threshold (default: 0.6).
+
+---
+
+## Color Spaces
+
+OpenCV uses several color spaces in this project:
+
+| Color Space | Format | Used For |
+|-------------|--------|----------|
+| **BGR** | Blue-Green-Red (OpenCV default) | Standard image display/storage |
+| **BGRA** | BGR + Alpha (transparency) | Overlaying glasses, watermarks |
+| **Grayscale** | Single channel (0=black, 255=white) | Face detection (faster, simpler) |
+| **HSV** | Hue-Saturation-Value | Color manipulation in filter.py |
+
+```python
+gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)    # For detection
+bgra = cv2.cvtColor(frame, cv2.COLOR_BGR2BGRA)    # For transparency
+hsv  = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)     # For color filters
+```
+
+> **Why BGR not RGB?** Historical — OpenCV was created in the 1990s and chose BGR byte order. It stuck.
+
+---
+
+## Image Processing Techniques Used
+
+### Alpha Blending (`cv2.addWeighted`)
+Combines two images with adjustable transparency:
+```python
+cv2.addWeighted(overlay, 0.25, frame, 1.0, 0, frame)
+# result = overlay × 0.25 + frame × 1.0 + 0
+# Makes overlay 25% visible on top of the original frame
+```
+Used in: watermark, sepia filter, color overlay.
+
+### Gaussian Blur (`cv2.GaussianBlur`)
+Smooths an image using a Gaussian (bell-curve) kernel:
+```python
+blured = cv2.GaussianBlur(frame, (21, 21), 11)
+# (21,21) = kernel size (must be odd)
+# 11 = sigma (standard deviation — higher = more blur)
+```
+Used in: portrait mode, circle focus blur.
+
+### Thresholding (`cv2.threshold`)
+Converts grayscale to pure black & white based on a cutoff:
+```python
+_, mask = cv2.threshold(gray, 120, 255, cv2.THRESH_BINARY)
+# pixel ≥ 120 → white (255)
+# pixel < 120 → black (0)
+```
+Used in: portrait mode (to separate foreground from background).
+
+---
+
+## Video I/O Concepts
+
+### Video Codec — XVID (`cv2.VideoWriter_fourcc`)
+```python
+cv2.VideoWriter_fourcc(*'XVID')  # = cv2.VideoWriter_fourcc('X','V','I','D')
+```
+**XVID** is an open-source MPEG-4 video codec. It compresses video frames for storage. The project uses it for both `.avi` and `.mp4` output.
+
+### Capture Properties
+```python
+cap.set(3, 1920)  # Property 3 = CV_CAP_PROP_FRAME_WIDTH
+cap.set(4, 1080)  # Property 4 = CV_CAP_PROP_FRAME_HEIGHT
+```
+These magic numbers (3, 4) set the webcam resolution. Modern code uses `cv2.CAP_PROP_FRAME_WIDTH` instead.
+
+---
+
+## File Formats
+
+| Format | Used For | Why |
+|--------|----------|-----|
+| [.xml](file:///e:/projects/Face_recognisation/src/cascades/data/haarcascade_eye.xml) | Haar Cascade models | OpenCV's standard format for cascade classifiers |
+| [.yml](file:///e:/projects/Face_recognisation/src/recognizers/face-trainner.yml) | LBPH trained model | YAML-based format for storing trained recognizer data |
+| [.pickle](file:///e:/projects/Face_recognisation/src/pickles/face-labels.pickle) | Label dictionary | Python's native serialization for arbitrary objects |
+| [.png](file:///e:/projects/Face_recognisation/src/4.png) | Saved faces, overlays | Lossless compression, supports transparency (alpha channel) |
+| [.jpg](file:///e:/projects/Face_recognisation/src/1.jpg) | Training images, timelapse | Lossy compression, smaller file size |
+| `.mp4` / `.avi` | Recorded videos | Standard video container formats |
